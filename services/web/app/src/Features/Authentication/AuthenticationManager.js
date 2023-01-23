@@ -14,6 +14,7 @@ const util = require('util')
 const HaveIBeenPwned = require('./HaveIBeenPwned')
 const UserAuditLogHandler = require('../User/UserAuditLogHandler')
 const logger = require('@overleaf/logger')
+const UserGetter = require("../User/UserGetter");
 
 const BCRYPT_ROUNDS = Settings.security.bcryptRounds || 12
 const BCRYPT_MINOR_VERSION = Settings.security.bcryptMinorVersion || 'a'
@@ -330,6 +331,128 @@ const AuthenticationManager = {
     }
     return true
   },
+
+  // ####################################################################################
+  // 随机生成单点登录的用户的密码
+  createPwdForSSOUser(){
+    let pwdSpace = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz0123456789!@#$%^&*()[]<>";
+    let pwdSpaceLen = pwdSpace.length;
+    let result = "";
+    for (i = 0; i < 32; i++) {
+      result += pwdSpace.charAt(Math.floor(Math.random() * pwdSpaceLen));
+    }
+    return result;
+  },
+
+  // ####################################################################################
+  // Apple SSO Code
+  // ####################################################################################
+  createOAuthAppleUserIfNotExist(apple_oauth_user, callback){
+    if(apple_oauth_user == null)
+      return callback('null apple_oauth_user!', null);
+    if(apple_oauth_user.sub == null || apple_oauth_user.sub === "")
+      return callback('null apple_oauth_user sub ID!', null);
+
+    const query = { thirdPartyIdentifiers : { $exists: true }, 'thirdPartyIdentifiers.appleSub': apple_oauth_user.sub}
+    UserGetter.getUser(query ,{}, (error, user) => {
+
+      if ((!user || !user.hashedPassword)) {
+        // create random pass for local userdb,for safety get passwd
+        let passwd = this.createPwdForSSOUser();
+        const userRegHand = require('../User/UserRegistrationHandler.js')
+
+        userRegHand.registerNewUser({
+              email: apple_oauth_user.email,
+              first_name: apple_oauth_user.firstName,
+              last_name: apple_oauth_user.lastName,
+              password: passwd,
+              thirdPartyIdentifiers: [ {appleSub: apple_oauth_user.sub} ]
+            },
+            function (error, user) {
+              if (error) {
+                return callback(error, null);
+              }
+              user.admin = false
+              user.emails[0].confirmedAt = Date.now()
+              user.save()
+
+              UserGetter.getUser(query, (error, user) => {
+                if (error) {
+                  return callback(error, null);
+                }
+                if (user && user.hashedPassword) {
+                  return callback(null, user);
+                } else {
+                  return callback("Unknown error", null);
+                }
+              })
+            }
+        );
+
+      }
+      else{
+        return callback(null, user);
+      }
+    })
+  },
+
+  // ####################################################################################
+  // Common SSO Code
+  // ####################################################################################
+  createUserIfNotExist(oauth_user, callback) {
+    // if `oauth_user` has email info
+    const oauth_email_exist = process.env.SHARELATEX_OAUTH_COMMON_USER_PROFILE_CONTAIN_EMAIL || 'false';
+    let oauth_new_user_email  = "";
+
+    if(oauth_email_exist === 'false'){
+      oauth_new_user_email = oauth_user[process.env.SHARELATEX_OAUTH_COMMON_USER_EMAIL_NAME_IDENTIFIER]
+          + "@" + process.env.SHARELATEX_OAUTH_COMMON_USER_EMAIL_DOMAIN
+    }
+    else{
+      oauth_new_user_email = oauth_user[process.env.SHARELATEX_OAUTH_COMMON_USER_EMAIL_NAME_IDENTIFIER];
+    }
+
+    const query = {
+      email: oauth_new_user_email
+    };
+    let parsedEmail = EmailHelper.parseEmail(query.email)
+    UserGetter.getUserByAnyEmail(parsedEmail, (error, user) => {
+      if ((!user || !user.hashedPassword)) {
+        // get passwd
+        let pass = this.createPwdForSSOUser();
+        const userRegHand = require('../User/UserRegistrationHandler.js')
+        userRegHand.registerNewUser({
+              email: query.email,
+              first_name: oauth_user.name,
+              last_name: "",
+              password: pass
+            },
+            function (error, user) {
+              if (error) {
+                return callback(error, null);
+              }
+              user.admin = false
+              user.emails[0].confirmedAt = Date.now()
+              user.save()
+
+              UserGetter.getUserByAnyEmail(EmailHelper.parseEmail(query.email), (error, user) => {
+                if (error) {
+                  return callback(error, null);
+                }
+                if (user && user.hashedPassword) {
+                  return callback(null, user);
+                } else {
+                  return callback("User null or user no hashed pwd error", null);
+                }
+              })
+            })
+      } else {
+        return callback(null, user);
+      }
+    });
+  },
+
+
 }
 
 AuthenticationManager.promises = {

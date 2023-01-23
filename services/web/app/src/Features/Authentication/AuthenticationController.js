@@ -26,6 +26,9 @@ const {
 const { ParallelLoginError } = require('./AuthenticationErrors')
 const { hasAdminAccess } = require('../Helpers/AdminAuthorizationHelper')
 const Modules = require('../../infrastructure/Modules')
+const axios = require('axios')
+const jwt = require('jsonwebtoken')
+const NodeRSA = require('node-rsa');
 
 function send401WithChallenge(res) {
   res.setHeader('WWW-Authenticate', 'OverleafLogin')
@@ -551,6 +554,228 @@ const AuthenticationController = {
       delete req.session.postLoginRedirect
     }
   },
+
+  // ####################################################################################
+  // Apple SSO Code
+  // ####################################################################################
+
+  oauthAppleRedirect(req, res, next){
+    const oauth_apple_allowed = process.env.SHARELATEX_OAUTH_APPLE_ENABLED || 'false';
+    if(oauth_apple_allowed === 'true'){
+      res.redirect(`${process.env.SHARELATEX_OAUTH_APPLE_AUTH_URL}?` +
+          querystring.stringify({
+            client_id: process.env.SHARELATEX_OAUTH_APPLE_CLIENT_ID,
+            response_type: "code id_token",
+            response_mode: "form_post",
+            scope: process.env.SHARELATEX_OAUTH_APPLE_SCOPE,
+            redirect_uri: (process.env.SHARELATEX_OAUTH_APPLE_REDIRECT_URL),
+          }));
+    }
+    else{
+      res.sendStatus(404);
+    }
+  },
+  oauthAppleGetJwtSignPrivateKey(){
+    let key = "";
+    if(process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_1 != null) {
+      key += process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_1;
+      key += '\n';
+    }
+
+    if(process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_2 != null){
+      key += process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_2;
+      key += '\n';
+    }
+
+    if(process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_3 != null){
+      key += process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_3;
+      key += '\n';
+    }
+
+    if(process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_4 != null){
+      key += process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_4;
+      key += '\n';
+    }
+
+    if(process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_5 != null){
+      key += process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_5;
+      key += '\n';
+    }
+
+    if(process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_6 != null){
+      key += process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_LINE_6;
+    }
+    return key;
+  },
+
+  oauthAppleGetClientSecret(){
+    const privateKey = this.oauthAppleGetJwtSignPrivateKey();
+    const headers = {
+      alg: 'ES256',
+      kid: process.env.SHARELATEX_OAUTH_APPLE_AUTH_SERVICE_SECRET_KEY_ID,
+    }
+    const timeNow = Math.floor(Date.now() / 1000);
+    const claims = {
+      iss: process.env.SHARELATEX_OAUTH_APPLE_DEVELOPER_TEAM_ID,
+      aud: 'https://appleid.apple.com',
+      sub: process.env.SHARELATEX_OAUTH_APPLE_CLIENT_ID,
+      iat: timeNow,
+      exp: timeNow + 180,
+    };
+    return jwt.sign(claims, privateKey, {algorithm: 'ES256', header: headers});
+  },
+
+  async oauthAppleGetPublicKey(kid){
+    let res = await axios.request({
+      method: "GET",
+      url: process.env.SHARELATEX_OAUTH_APPLE_PUBLIC_KEY_URL,
+    });
+    const keys = res.data.keys;
+    const key = keys.find(k => k.kid === kid);
+    const pubKey = new NodeRSA();
+
+    pubKey.importKey(
+        { n: Buffer.from(key.n, 'base64'),
+          e: Buffer.from(key.e, 'base64') },
+        'components-public');
+    return pubKey.exportKey(['public']);
+  },
+
+  async oauthAppleVerifyIDToken (idToken, clientID){
+    if (!idToken) {
+      throw new Error("OBJECT_NOT_FOUND,id token is invalid for this user.");
+    }
+    let jwtClaims = {};
+    try {
+      const decodedToken = jwt.decode(idToken, { complete: true });
+      const applePublicKey = await AuthenticationController.oauthAppleGetPublicKey(decodedToken.header.kid);
+      jwtClaims = jwt.verify(idToken, applePublicKey, { algorithms: 'RS256' });
+    }catch (err) {
+      throw new Error('apple public key is invalid for this user.');
+    }
+    return jwtClaims;
+  },
+
+  oauthAppleCallback(req, res, next){
+    const oauth_allowed = process.env.SHARELATEX_OAUTH_APPLE_ENABLED || 'false';
+    if(oauth_allowed === 'false'){
+      return;
+    }
+    const params = new URLSearchParams()
+    params.append('grant_type', "authorization_code")
+    params.append('client_id', process.env.SHARELATEX_OAUTH_APPLE_CLIENT_ID)
+    params.append('client_secret', AuthenticationController.oauthAppleGetClientSecret())
+    params.append("code", req.body.code)
+    params.append('redirect_uri', (process.env.SHARELATEX_OAUTH_APPLE_REDIRECT_URL))
+
+    axios.post(process.env.SHARELATEX_OAUTH_APPLE_TOKEN_URL, params, {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      }
+    }).then(response => {
+      AuthenticationController.oauthAppleVerifyIDToken(response.data.id_token, process.env.SHARELATEX_OAUTH_APPLE_CLIENT_ID).then(
+          (jwtClaims) => {
+            console.log(jwtClaims);
+            let appleAuthUser = {};
+            if(req.body.user!= null && req.body.user.name!= null){
+              appleAuthUser = {
+                sub: jwtClaims.sub,
+                email: jwtClaims.email,
+                firstName: req.body.user.name.firstName,
+                lastName: req.body.user.name.lastName
+              };
+            }
+            else{
+              appleAuthUser = {
+                sub: jwtClaims.sub,
+                email: jwtClaims.email,
+                firstName: "unknown" ,
+                lastName: "unknown"
+              };
+            }
+
+            AuthenticationManager.createOAuthAppleUserIfNotExist(appleAuthUser, (error, user) => {
+              if (error) {
+                res.json({ message: error });
+              } else {
+                AuthenticationController.finishLogin(user, req, res, next);
+              }
+            });
+          });
+    }).catch(error => {
+      return res.status(500).json({
+        message: 'error',
+        error: error
+      })
+    })
+  },
+
+  // ####################################################################################
+  // Common SSO Code
+  // ####################################################################################
+  oauthCommonRedirect(req, res, next) {
+    const oauth_allowed = process.env.SHARELATEX_OAUTH_COMMON_ENABLED || 'false';
+    if(oauth_allowed === 'true'){
+      res.redirect(`${process.env.SHARELATEX_OAUTH_COMMON_AUTH_URL}?` +
+          querystring.stringify({
+            client_id: process.env.SHARELATEX_OAUTH_COMMON_CLIENT_ID,
+            response_type: "code",
+            scope: process.env.SHARELATEX_OAUTH_COMMON_SCOPE,
+            redirect_uri: (process.env.SHARELATEX_OAUTH_COMMON_REDIRECT_URL),
+          }));
+    }
+    else{
+      res.sendStatus(404);
+    }
+  },
+
+  oauthCommonCallback(req, res, next) {
+    const oauth_allowed = process.env.SHARELATEX_OAUTH_COMMON_ENABLED || 'false';
+    if(oauth_allowed === 'false'){
+      res.sendStatus(404);
+      return;
+    }
+
+    const params = new URLSearchParams()
+    params.append('grant_type', "authorization_code")
+    params.append('client_id', process.env.SHARELATEX_OAUTH_COMMON_CLIENT_ID)
+    params.append('client_secret', process.env.SHARELATEX_OAUTH_COMMON_CLIENT_SECRET)
+    params.append("code", req.query.code)
+    params.append('redirect_uri', (process.env.SHARELATEX_OAUTH_COMMON_REDIRECT_URL))
+
+
+    axios.post(process.env.SHARELATEX_OAUTH_COMMON_ACCESS_TOKEN_URL, params, {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json"
+      }
+    }).then(access_res => {
+      let authorization_bearer = "Bearer " + access_res.data.access_token
+
+      let axios_get_config = {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": authorization_bearer,
+        },
+        params: access_res.data
+      }
+
+      axios.get(process.env.SHARELATEX_OAUTH_COMMON_USER_PROFILE_URL, axios_get_config).then(info_res => {
+        if (info_res.data.err) {
+          res.json({ message: info_res.data.err });
+        } else {
+          AuthenticationManager.createUserIfNotExist(info_res.data, (error, user) => {
+            if (error) {
+              res.json({ message: error });
+            } else {
+              AuthenticationController.finishLogin(user, req, res, next);
+            }
+          });
+        }
+      });
+    });
+  },
+
 }
 
 function _afterLoginSessionSetup(req, user, callback) {

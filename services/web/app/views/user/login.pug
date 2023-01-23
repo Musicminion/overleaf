@@ -34,3 +34,17 @@ block content
 									span(data-ol-inflight="idle") #{translate("login")}
 									span(hidden data-ol-inflight="pending") #{translate("logging_in")}…
 								a.pull-right(href='/user/password/reset') #{translate("forgot_your_password")}?
+							if ((process.env.SHARELATEX_OAUTH_ENABLED || 'false') == 'true')
+								p.login-register-hr-text-container(style='text-align: center')
+									span.login-register-hr-text
+										| #{process.env.SHARELATEX_OAUTH_HR_LINE_TEXT}
+								if ((process.env.SHARELATEX_OAUTH_COMMON_ENABLED || 'false') == 'true')
+									.form-group.text-center(style="padding-top: 0px")
+										a.btn-block.login-btn(href="/auth/oauth/common/redirect" style='padding-left: 0px')
+											| #{process.env.SHARELATEX_OAUTH_COMMON_BUTTON_NAME}
+								if ((process.env.SHARELATEX_OAUTH_APPLE_ENABLED || 'false') == 'true')
+									.form-group.text-center(style="padding-top: 5px;")
+										a.btn-block.login-btn(href="/auth/oauth/apple/redirect" style='padding-left: 0px;display: flex; justify-content: center; align-items: center; background-color:#000000;')
+											svg(viewBox='0 0 48 48', style='width: 18px; fill: white; display:inline-block; margin: 2px', focusable='false', aria-hidden='true', role='img', data-social-button-type='icon')
+												path(d='M41.214 35.639a23.937 23.937 0 0 1-2.365 4.253 21.6 21.6 0 0 1-3.049 3.683 5.907 5.907 0 0 1-3.915 1.725 9.826 9.826 0 0 1-3.618-.863 10.372 10.372 0 0 0-3.895-.861 10.732 10.732 0 0 0-4 .861 10.791 10.791 0 0 1-3.46.91 5.568 5.568 0 0 1-4.012-1.772 22.706 22.706 0 0 1-3.187-3.813 26.36 26.36 0 0 1-3.371-6.695 24.508 24.508 0 0 1-1.415-7.979 14.571 14.571 0 0 1 1.913-7.623 11.224 11.224 0 0 1 4.008-4.054 10.788 10.788 0 0 1 5.417-1.529 12.745 12.745 0 0 1 4.191.976 13.483 13.483 0 0 0 3.324.977 19.946 19.946 0 0 0 3.685-1.151 12.187 12.187 0 0 1 5.01-.89 10.635 10.635 0 0 1 8.332 4.387 9.269 9.269 0 0 0-4.915 8.42 9.284 9.284 0 0 0 3.05 7 10.01 10.01 0 0 0 3.047 2q-.365 1.062-.775 2.038zM32.724 2.23a9.39 9.39 0 0 1-2.406 6.157c-1.934 2.26-4.273 3.567-6.809 3.361a6.715 6.715 0 0 1-.052-.834 9.644 9.644 0 0 1 2.553-6.222 9.833 9.833 0 0 1 3.11-2.335 9.287 9.287 0 0 1 3.558-1.008 8.164 8.164 0 0 1 .046.881z').
+											span #{process.env.SHARELATEX_OAUTH_Apple_BUTTON_NAME}

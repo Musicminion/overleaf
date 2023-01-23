@@ -1387,7 +1387,33 @@ function initialize(webRouter, privateApiRouter, publicApiRouter) {
     TokenAccessController.grantTokenAccessReadOnly
   )
 
-  webRouter.get('/unsupported-browser', renderUnsupportedBrowserPage)
 
+  // OAuth EndPoint Contain 2 types, one for common OAuth, the other for apple Auth
+  // Considering before a user login, he has no session
+  // So we need to add EndPoint to white list with function addEndpointToLoginWhitelist
+  // 两种单点登录方式，一种支持普通的例如Github，另一种是专门针对苹果的单点登录方法
+  // 因为用户登陆前没有Session，所以需要把端点加白名单
+  // Common OAuth
+  webRouter.get('/auth/oauth/common/redirect', AuthenticationController.oauthCommonRedirect)
+  webRouter.get('/auth/oauth/common/callback', AuthenticationController.oauthCommonCallback)
+  AuthenticationController.addEndpointToLoginWhitelist('/auth/oauth/common/redirect')
+  AuthenticationController.addEndpointToLoginWhitelist('/auth/oauth/common/callback')
+
+  // Apple OAuth
+  webRouter.get('/auth/oauth/apple/redirect', AuthenticationController.oauthAppleRedirect)
+  webRouter.post(
+      '/auth/oauth/apple/callback',
+      RateLimiterMiddleware.rateLimit({
+        endpointName: 'read-and-write-token',
+        maxRequests: 15,
+        timeInterval: 60,
+      }),
+      AuthenticationController.oauthAppleCallback
+  );
+  AuthenticationController.addEndpointToLoginWhitelist('/auth/oauth/apple/redirect')
+  AuthenticationController.addEndpointToLoginWhitelist('/auth/oauth/apple/callback')
+
+
+  webRouter.get('/unsupported-browser', renderUnsupportedBrowserPage)
   webRouter.get('*', ErrorController.notFound)
 }

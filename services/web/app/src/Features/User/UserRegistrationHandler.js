@@ -31,6 +31,7 @@ const UserRegistrationHandler = {
           first_name: userDetails.first_name,
           last_name: userDetails.last_name,
           analyticsId: userDetails.analyticsId,
+          thirdPartyIdentifiers: userDetails.thirdPartyIdentifiers
         },
         {},
         callback

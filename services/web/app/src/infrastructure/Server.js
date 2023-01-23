@@ -201,6 +201,8 @@ Modules.hooks.fire('passportSetup', passport, function (err) {
 Modules.applyNonCsrfRouter(webRouter, privateApiRouter, publicApiRouter)
 
 webRouter.csrf = new Csrf()
+webRouter.csrf.disableDefaultCsrfProtection("/auth/oauth/apple/callback","POST")
+
 webRouter.use(webRouter.csrf.middleware)
 webRouter.use(translations.i18nMiddleware)
 webRouter.use(translations.setLangBasedOnDomainMiddleware)
